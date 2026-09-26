@@ -18,10 +18,13 @@
 //   TODO maybe: flat array of levels indexed by ticks from the best price,
 //   should be more cache friendly for dense books
 //
-// - Orders come from ObjectPool so the hot path doesn't malloc
+// - Orders come from ObjectPool, and the map nodes come from a pmr pool over
+//   an arena we fault in at startup -> no malloc and no page faults on the
+//   hot path (waitlens is how I found those, see README)
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <memory_resource>
 #include <memory>
 #include <optional>
 #include <string>
@@ -82,6 +85,8 @@ struct Quote {
 
 class Book {
 public:
+    explicit Book(std::pmr::memory_resource* mr = std::pmr::get_default_resource())
+        : bids_(mr), asks_(mr) {}
 
     void add(Order* o);
     void remove(Order* o);                    // just unlinks, caller frees it
@@ -103,8 +108,8 @@ private:
     template <typename Map>
     void remove_from(Map& m, Order* o);
 
-    std::map<uint32_t, Level, std::greater<uint32_t>> bids_;  // highest first
-    std::map<uint32_t, Level, std::less<uint32_t>> asks_;     // lowest first
+    std::pmr::map<uint32_t, Level, std::greater<uint32_t>> bids_;  // highest first
+    std::pmr::map<uint32_t, Level, std::less<uint32_t>> asks_;     // lowest first
 };
 
 struct BookStats {
@@ -136,6 +141,13 @@ private:
     Book& book_for(uint16_t locate);
     void remove_order(Order* o);
 
+    // NOTE: has to be declared before books_ so it gets destroyed *after*
+    // them (the maps free into it on destruction -- got a segfault before).
+    // the arena is allocated + touched once at startup, then the pool just
+    // recycles nodes as levels come and go
+    std::vector<std::byte> level_arena_;
+    std::pmr::monotonic_buffer_resource level_upstream_;
+    std::pmr::unsynchronized_pool_resource level_pool_;
     std::vector<std::unique_ptr<Book>> books_;  // indexed by stock locate
 #ifdef FH_STD_INDEX
     StdHashMap<Order*> orders_;

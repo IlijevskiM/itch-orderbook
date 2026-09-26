@@ -98,8 +98,26 @@ speedup on the synthetic benchmark.
 | Intrusive list per price level | O(1) removal given the `Order*`, no allocation, FIFO = time priority | `std::list` (allocates), vector (O(n) erase) |
 | `FlatHashMap` for order refs | inline keys, linear probing, backward-shift delete, no per-node allocation | `std::unordered_map` (build with `FH_STD_INDEX` to compare) |
 | `std::map` for price levels | best price at `begin()`, stable node addresses | flat array indexed by ticks from the touch (faster for dense books) |
-| Object pool for orders | no malloc/free on the hot path | `new`/`delete`; `std::pmr` pool resources |
+| Object pool for orders, pre-grown at startup | no malloc/free and no first-touch page faults on the hot path | `new`/`delete` |
+| `std::pmr` pool over a pre-faulted arena for price-level map nodes | `std::map` node allocations were faulting in fresh pages on the book thread | a custom node allocator; a flat price array |
 | MoldUDP64 sequence tracking | UDP drops packets; a gap means the book is untrustworthy until recovered | request a retransmit from the rewind server, or rebuild from a snapshot |
+
+## Profiling it with waitlens
+
+[waitlens](https://github.com/IlijevskiM/waitlens) (my eBPF latency profiler) showed two things
+about the pipeline mode on a 2-vCPU VM with a 5M-message synthetic stream:
+
+1. The book thread took **9,268 page faults** on its hot path: first-touch faults from the order
+   pool growing and from `std::map` allocating price-level nodes. Pre-growing the pool and moving
+   level nodes onto a `std::pmr::unsynchronized_pool_resource` over a pre-faulted 32 MB arena cut
+   that to **28** and raised pipeline throughput about 9%.
+2. Nearly every context switch was a preemption, with run-queue waits up to ~2 ms. With only two
+   cores the p99 tail comes from the scheduler, so pin threads to isolated cores before
+   micro-optimizing the book.
+
+```bash
+sudo waitlens -- ./build-prof/replay data/<day> --mode pipeline
+```
 
 ## Ideas to extend
 

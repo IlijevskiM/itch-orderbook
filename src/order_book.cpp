@@ -55,13 +55,18 @@ std::vector<Quote> Book::depth(char side, size_t n) const {
     return out;
 }
 
-OrderBookManager::OrderBookManager(size_t expected_orders) : orders_(expected_orders) {
+OrderBookManager::OrderBookManager(size_t expected_orders)
+    : level_arena_(32u << 20),  // zero-init touches every page here instead of later
+      level_upstream_(level_arena_.data(), level_arena_.size()),
+      level_pool_(&level_upstream_),
+      orders_(expected_orders) {
+    pool_.reserve(expected_orders);
     books_.resize(1 << 16);  // stock locate is a uint16
 }
 
 Book& OrderBookManager::book_for(uint16_t locate) {
     auto& b = books_[locate];
-    if (!b) b = std::make_unique<Book>();
+    if (!b) b = std::make_unique<Book>(&level_pool_);
     return *b;
 }
 

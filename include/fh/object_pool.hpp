@@ -42,6 +42,13 @@ public:
         --live_;
     }
 
+    // grow the pool before we start so the hot path never has to. grow()
+    // writes every node while linking the free list, so this also faults the
+    // pages in now instead of on the book thread (waitlens caught that)
+    void reserve(size_t n) {
+        while (capacity() < n) grow();
+    }
+
     size_t live() const noexcept { return live_; }
     size_t capacity() const noexcept { return chunks_.size() * ChunkSize; }
 
