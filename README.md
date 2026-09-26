@@ -62,9 +62,9 @@ exact command so they can be reproduced):
 | Metric | Command | What to read |
 |---|---|---|
 | messages decoded in a full day | `replay <day> --mode single` | `messages:` |
-| throughput | `replay <day> --mode single` and `--mode pipeline` | `throughput:` (best of 5 runs) |
+| throughput | `replay <day> --mode single` and `--mode pipeline` | `throughput:` (median of 5 runs) |
 | p50 / p99 latency | `replay <day> --mode pipeline --rate R --pin 2,3` | `latency ... p50 / p99` |
-| hash map speedup | build with and without `-DFH_STD_INDEX=ON`, run `bench` | ratio of single-thread throughput |
+| hash map speedup | build a second copy with `-DFH_STD_INDEX=ON`, run `replay --mode single` on both | ratio of median throughput |
 
 Notes:
 
@@ -81,13 +81,43 @@ perf stat -e cycles,instructions,cache-misses,branch-misses ./build-prof/replay 
 perf record -g ./build-prof/replay data/<day> --mode single && perf report
 ```
 
-On this code base the order-reference lookup was the first hotspot `perf` points to; swapping
-`std::unordered_map` for the open-addressing `FlatHashMap` gave roughly a 1.8x single-thread
-speedup on the synthetic benchmark.
+Laptop runs are noisy (turbo boost, background stuff), so alternate the two builds run by run
+instead of doing all of one then all of the other, and report medians.
+
+## Results
+
+One full NASDAQ BX trading day (`20200130.BX_ITCH_50`: 53.3M messages, 48.7M book updates) on a
+2019 13" MacBook Pro (i5-8257U, 4 cores / 8 threads, 8 GB), Apple Clang 17, Release build.
+Every run ends with `unknown refs 0` and `live orders at end: 0`, so every execute / cancel /
+delete / replace found its order and the books drain to empty at the close.
+
+| Mode | Median | Range |
+|---|---|---|
+| single thread, `FlatHashMap` (5 runs) | 3.32 M updates/s | 2.32 - 4.21 |
+| single thread, `std::unordered_map` (5 runs) | 2.01 M updates/s | 1.64 - 2.26 |
+| pipeline, 2 threads (3 runs) | 3.08 M updates/s | 3.02 - 3.09 |
+
+Latency from decode to "applied to the book", with the producer paced:
+
+| Rate | p50 | p99 | max |
+|---|---|---|---|
+| 500K/s | 411 ns | 85 us | 44 ms |
+| 1M/s | 432 ns | > 100 us | 28 ms |
+| 2M/s | 598 ns | > 100 us | 19 ms |
+
+What I take from this:
+
+* `FlatHashMap` is about 1.65x faster than `std::unordered_map` (median vs median). The order
+  index is hit on every single update, so this is the biggest single win.
+* The pipeline is *not* faster than one thread on this laptop, but it is way more consistent
+  (3.02-3.09 vs 2.32-4.21). Not sure why yet, profiling it on Linux is next.
+* The handoff itself is sub-microsecond at the median. The tail is the OS: macOS can't pin
+  threads to cores, and stalls of tens of ms show up in `max`. Needs pinned, isolated cores on
+  Linux before the p99 means anything.
 
 ## Design decisions
 
-| Decision | Why | Alternative you can discuss |
+| Decision | Why | Alternatives |
 |---|---|---|
 | mmap the input file | no copy into user space; the OS pages it in sequentially | `read()` into a buffer; io_uring |
 | Zero-copy decode with `memcpy` + `bswap` | fields are big-endian and unaligned; `memcpy` avoids UB and compiles to one load | `#pragma pack` structs (UB on unaligned access, non-portable) |
