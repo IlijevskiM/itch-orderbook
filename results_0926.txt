@@ -1,0 +1,23 @@
+Intel(R) Core(TM) i5-8257U CPU @ 1.40GHz
+8
+8589934592
+Apple clang version 17.0.0 (clang-1700.0.13.5)
+== hash map A/B (single thread) ==
+build      throughput: 2.32 M events/s
+build-std  throughput: 1.89 M events/s
+build      throughput: 3.32 M events/s
+build-std  throughput: 1.64 M events/s
+build      throughput: 3.49 M events/s
+build-std  throughput: 2.26 M events/s
+build      throughput: 2.98 M events/s
+build-std  throughput: 2.01 M events/s
+build      throughput: 4.21 M events/s
+build-std  throughput: 2.26 M events/s
+== pipeline max throughput ==
+pipeline   throughput: 3.09 M events/s
+pipeline   throughput: 3.02 M events/s
+pipeline   throughput: 3.08 M events/s
+== paced latency ==
+rate 500000   latency decode->applied (ns): p50 411  p99 85188  p99.9 100000  max 44485302
+rate 1000000  latency decode->applied (ns): p50 432  p99 100000  p99.9 100000  max 28047203
+rate 2000000  latency decode->applied (ns): p50 598  p99 100000  p99.9 100000  max 18854209
