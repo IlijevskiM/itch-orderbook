@@ -137,11 +137,12 @@ What I take from this:
 [waitlens](https://github.com/IlijevskiM/waitlens) (my eBPF latency profiler) showed two things
 about the pipeline mode on a 2-vCPU VM with a 5M-message synthetic stream:
 
-1. The book thread took **9,268 page faults** on its hot path: first-touch faults from the order
+1. The book thread took **9,265 page faults** on its hot path: first-touch faults from the order
    pool growing and from `std::map` allocating price-level nodes. Pre-growing the pool and moving
    level nodes onto a `std::pmr::unsynchronized_pool_resource` over a pre-faulted 32 MB arena cut
-   that to **28** and raised pipeline throughput about 9%.
-2. Nearly every context switch was a preemption, with run-queue waits up to ~2 ms. With only two
+   that to **28** and raised pipeline throughput about 8% (median of 22 runs each). The faults
+   moved to startup on the main thread, which is the point.
+2. Nearly every context switch was a preemption (123 of 128), with run-queue waits up to ~4 ms. With only two
    cores the p99 tail comes from the scheduler, so pin threads to isolated cores before
    micro-optimizing the book.
 
